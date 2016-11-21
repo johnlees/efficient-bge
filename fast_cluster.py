@@ -5,6 +5,7 @@
 import os,sys
 import argparse
 import subprocess
+import itertools
 
 import numpy as np
 from sklearn.manifold import TSNE
@@ -12,9 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
-
-# Remove when done
-import pdb
+import matplotlib.markers
 
 separator = "\t"
 
@@ -120,6 +119,7 @@ csv_out.close()
 # Draw plot (see http://scikit-learn.org/stable/auto_examples/cluster/plot_dbscan.html)
 unique_labels = set(dbscan_clusters)
 colours = plt.cm.Spectral(np.linspace(0, 1, len(unique_labels)))
+markers = itertools.cycle(matplotlib.markers.MarkerStyle.filled_markers)
 for k, col in zip(unique_labels, colours):
     class_member_mask = (dbscan_clusters == k)
     xy = embedding[class_member_mask]
@@ -127,11 +127,11 @@ for k, col in zip(unique_labels, colours):
     if k == -1:
         # Black used for noise.
         col = 'k'
-        plt.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=col,
-             markeredgecolor='k', markersize=6)
+        plt.plot(xy[:, 0], xy[:, 1], marker='o', markerfacecolor=col,
+             markeredgecolor='k', markersize=6, linestyle='None')
     else:
-        plt.plot(xy[:, 0], xy[:, 1], 'o', markerfacecolor=col,
-             markeredgecolor='k', markersize=10)
+        plt.plot(xy[:, 0], xy[:, 1], marker=next(markers), markerfacecolor=col,
+             markeredgecolor='k', markersize=10, linestyle='None')
 
 plt.title('Estimated number of clusters: %d' % len(set(dbscan_clusters)))
 plt.savefig(args.output_prefix + '.pdf')
@@ -158,7 +158,6 @@ if os.path.isfile(args.baps_file):
         baps_sets[baps[lane]-1].append(lane)
 
     # Compare with fast cluster results
-    pdb.set_trace()
     confusion_out = open(args.output_prefix + ".baps_confusion.txt", 'w')
     confusion_out.write(separator.join(["BAPS cluster","Total in BAPS cluster"] + [str(x) for x in sorted(set(dbscan_clusters))]) + "\n")
 
