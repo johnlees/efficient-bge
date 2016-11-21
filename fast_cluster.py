@@ -49,11 +49,10 @@ with open(args.assembly_file) as f:
         i += 1
 
 # Run mash
-sys.stderr.write("Calculating distances with mash\n")
-
 if os.path.isfile(str(args.distmat)):
     distances = np.loadtxt(str(args.distmat), delimiter=",")
 elif not os.path.isfile(str(args.embedding_file)):
+    sys.stderr.write("Calculating distances with mash\n")
     distances = np.zeros((len(file_num), len(file_num)))
     try:
         if not os.path.isfile("reference.msh"):
@@ -159,21 +158,19 @@ if os.path.isfile(args.baps_file):
         baps_sets[baps[lane]-1].append(lane)
 
     # Compare with fast cluster results
+    pdb.set_trace()
     confusion_out = open(args.output_prefix + ".baps_confusion.txt", 'w')
-    confusion_out.write(separator.join(("BAPS cluster","# in BAPS cluster","# in fast cluster")) + "\n")
+    confusion_out.write(separator.join(["BAPS cluster","Total in BAPS cluster"] + [str(x) for x in sorted(set(dbscan_clusters))]) + "\n")
 
     score = 0
     for cluster in baps_clusters:
         num_in_cluster = [0] * len(set(dbscan_clusters))
         for lane in baps_sets[cluster-1]:
             fast_cluster = dbscan_clusters[file_index[lane]]
-            if fast_cluster == -1:
-                num_in_cluster[0] += 1
-            else:
-                num_in_cluster[fast_cluster] += 1
+            num_in_cluster[fast_cluster+1] += 1
 
         score += max(num_in_cluster)
-        confusion_out.write(separator.join((str(cluster), str(len(baps_sets[cluster-1])), str(max(num_in_cluster)))) + "\n")
+        confusion_out.write(separator.join([str(cluster), str(len(baps_sets[cluster-1]))] + [str(x) for x in num_in_cluster]) + "\n")
 
     confusion_out.close()
     sys.stderr.write("Compared to " + str(len(baps_clusters)) + " BAPS clusters, " + str(score) + " samples of " + str(len(file_num)) + " are in the same clusters\n")
