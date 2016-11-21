@@ -60,7 +60,7 @@ elif not os.path.isfile(str(args.embedding_file)):
             mash_command = str(args.mash_exec) + " sketch -o reference " + separator.join(file_names)
             retcode = subprocess.call(mash_command, shell=True)
             if retcode < 0:
-                print >>sys.stderr, "Mash failed with signal", -retcode
+                sys.stderr.write("Mash failed with signal " + str(retcode))
 
         p = subprocess.Popen([str(args.mash_exec) + ' dist reference.msh reference.msh'], stdout=subprocess.PIPE, shell=True)
         for line in iter(p.stdout.readline, ''):
@@ -74,7 +74,7 @@ elif not os.path.isfile(str(args.embedding_file)):
                 break
 
     except OSError as e:
-        print >>sys.stderr, "Mash Execution failed:", e
+        sys.stderr.write("Mash Execution failed: " + str(e))
 
     np.savetxt(str(args.output_prefix) + ".distances.csv", distances, delimiter=",")
 
