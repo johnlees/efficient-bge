@@ -22,7 +22,7 @@ mash_chunk_size = 500
 def run_mash_sketch(file_names):
     # Needs to be done in chunks to prevent massive command lines
     mash_sep = " "
-    for chunk in range(len(file_names) // mash_chunk_size):
+    for chunk in range(((len(file_names) - 1) // mash_chunk_size) + 1):
         chunk_start = chunk * mash_chunk_size
         chunk_end = (chunk+1) * mash_chunk_size
         if chunk_end > len(file_names):
@@ -36,13 +36,13 @@ def run_mash_sketch(file_names):
 
     if (len(file_names) // mash_chunk_size) > 0:
         paste_join = ".msh reference"
-        mash_paste_command = str(args.mash_exec) + " paste reference reference" + paste_join.join([str(chunk) for chunk in range(0, len(file_names) // mash_chunk_size)]) + ".msh"
+        mash_paste_command = str(args.mash_exec) + " paste reference reference" + paste_join.join([str(chunk) for chunk in range(((len(file_names) - 1) // mash_chunk_size) + 1)]) + ".msh"
         retcode = subprocess.call(mash_paste_command, shell=True)
         if retcode < 0:
             sys.stderr.write("Mash paste failed with signal " + str(retcode) + "\n")
             sys.exit(1)
         else:
-            for chunk in range(len(file_names) // mash_chunk_size):
+            for chunk in range(((len(file_names) - 1) // mash_chunk_size) + 1):
                 os.remove("reference" + str(chunk) + ".msh")
     else:
         os.rename("reference0.msh", "reference.msh")
@@ -54,7 +54,7 @@ parser.add_argument("-o","--output", dest="output_prefix", help="Output prefix",
 parser.add_argument("-d","--dimensions",dest="dimensions",help="Number of t-SNE dimensions to embed to",type=int,default=2)
 parser.add_argument("--dist_mat",dest="distmat", help="Pre-computed distances.csv matrix", default=None)
 parser.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
-parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison",default=None)
+parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison")
 parser.add_argument("-m", "--mash", dest="mash_exec", help="Location of mash executable",default='mash')
 parser.add_argument("--min_pts", dest="min_pts", help="Minimum number of samples in each cluster",default=5, type=int)
 parser.add_argument("--epsilon", dest="epsilon", help="Distance between DBSCAN clusters (pick with knn_plot)",default=0.1,type=float)
