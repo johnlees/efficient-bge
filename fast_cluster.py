@@ -54,7 +54,7 @@ parser.add_argument("-o","--output", dest="output_prefix", help="Output prefix",
 parser.add_argument("-d","--dimensions",dest="dimensions",help="Number of t-SNE dimensions to embed to",type=int,default=2)
 parser.add_argument("--dist_mat",dest="distmat", help="Pre-computed distances.csv matrix", default=None)
 parser.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
-parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison")
+parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
 parser.add_argument("-m", "--mash", dest="mash_exec", help="Location of mash executable",default='mash')
 parser.add_argument("--min_pts", dest="min_pts", help="Minimum number of samples in each cluster",default=5, type=int)
 parser.add_argument("--epsilon", dest="epsilon", help="Distance between DBSCAN clusters (pick with knn_plot)",default=0.1,type=float)
@@ -79,7 +79,7 @@ with open(args.assembly_file) as f:
 
 # Run mash
 if os.path.isfile(str(args.distmat)):
-    distances = np.loadtxt(str(args.distmat), delimiter=",")
+    distances = np.load(str(args.distmat))
 elif not os.path.isfile(str(args.embedding_file)):
     sys.stderr.write("Calculating distances with mash\n")
     distances = np.zeros((len(file_num), len(file_num)))
@@ -101,7 +101,7 @@ elif not os.path.isfile(str(args.embedding_file)):
     except OSError as e:
         sys.stderr.write("Mash Execution failed: " + str(e))
 
-    np.savetxt(str(args.output_prefix) + ".distances.csv", distances, delimiter=",")
+    np.save(str(args.output_prefix) + ".distances.csv", distances)
 
 # Run t-SNE
 if os.path.isfile(str(args.embedding_file)):
@@ -165,7 +165,7 @@ plt.savefig(args.output_prefix + '.pdf')
 plt.close()
 
 # Compare with BAPS, if provided
-if os.path.isfile(args.baps_file):
+if os.path.isfile(str(args.baps_file)):
     baps = {}
     baps_clusters = set()
 
