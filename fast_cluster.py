@@ -6,6 +6,7 @@ import os,sys
 import argparse
 import subprocess
 import itertools
+import csv
 
 import numpy as np
 from sklearn.manifold import TSNE
@@ -49,16 +50,22 @@ def run_mash_sketch(file_names):
 
 # Get options
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("assembly_file", help="Tab separated file with sample name and assembly location on each line")
+parser.add_argument("--assembly_file", help="Tab separated file with sample name and assembly location on each line")
 parser.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
 parser.add_argument("-d","--dimensions",dest="dimensions",help="Number of t-SNE dimensions to embed to",type=int,default=2)
-parser.add_argument("--dist_mat",dest="distmat", help="Pre-computed distances.csv matrix", default=None)
+parser.add_argument("--dist_mat",dest="distmat", help="Pre-computed distances.csv.npy matrix", default=None)
+parser.add_argument("--seaview_mat",dest="seaview_mat", help="Pre-computed distances matrix from seaview", default=None)
 parser.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
 parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
 parser.add_argument("-m", "--mash", dest="mash_exec", help="Location of mash executable",default='mash')
 parser.add_argument("--min_pts", dest="min_pts", help="Minimum number of samples in each cluster",default=5, type=int)
 parser.add_argument("--epsilon", dest="epsilon", help="Distance between DBSCAN clusters (pick with knn_plot)",default=0.1,type=float)
 args = parser.parse_args()
+
+# Need one and only one of these inputs (XOR)
+if not bool(os.path.isfile(str(args.assembly_file))) ^ bool(os.path.isfile(str(args.seaview_mat))):
+    sys.stderr.write("Need one of --assembly_file or --seaview_mat\n")
+    sys.exit(1)
 
 # Read in files
 file_index = {}
@@ -67,20 +74,41 @@ file_num = []
 file_names = []
 i = 0
 
-with open(args.assembly_file) as f:
-    for line in f:
-        line = line.rstrip()
-        (name, file_name) = line.split(separator)
-        file_index[name] = i
-        file_name_index[file_name] = i
-        file_num.append(name)
-        file_names.append(file_name)
-        i += 1
+if os.path.isfile(str(args.assembly_file)):
+    with open(str(args.assembly_file)) as f:
+        for line in f:
+            line = line.rstrip()
+            (name, file_name) = line.split(separator)
+            file_index[name] = i
+            file_name_index[file_name] = i
+            file_num.append(name)
+            file_names.append(file_name)
+            i += 1
 
-# Run mash
+# Create distance matrix
 if os.path.isfile(str(args.distmat)):
     distances = np.load(str(args.distmat))
+elif os.path.isfile(str(args.seaview_mat)):
+    # Read from seaview
+    with open(str(args.seaview_mat), 'r') as f:
+        reader = csv.reader(f)
+        seaview_mat = list(reader)
+
+    # Create file objects as for assemblies (may be used in BAPS comparison)
+    file_num = seaview_mat[0][1:len(seaview_mat[0])]
+    for file_name in file_num:
+        file_index[file_name] = i
+
+    # Distances remove the row and column names
+    distances = np.zeros((len(file_num), len(file_num)))
+    line_nr = 0
+    for line in seaview_mat:
+        if line_nr > 0:
+            distances[line_nr-1,:] = np.asarray(line[1:len(seaview_mat[0])])
+        line_nr += 1
+
 elif not os.path.isfile(str(args.embedding_file)):
+    # Run mash
     sys.stderr.write("Calculating distances with mash\n")
     distances = np.zeros((len(file_num), len(file_num)))
     try:
