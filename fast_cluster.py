@@ -9,7 +9,7 @@ import itertools
 import csv
 
 import numpy as np
-from sklearn.manifold import TSNE
+from sklearn.manifold import TSNE,MDS
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
@@ -54,6 +54,7 @@ parser.add_argument("--assembly_file", help="Tab separated file with sample name
 parser.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
 parser.add_argument("-d","--dimensions",dest="dimensions",help="Number of t-SNE dimensions to embed to",type=int,default=2)
 parser.add_argument("--dist_mat",dest="distmat", help="Pre-computed distances.csv.npy matrix", default=None)
+parser.add_argument("--mds", dest="mds", action='store_true', default=False, help="Use MDS instead of t-SNE")
 parser.add_argument("--seaview_mat",dest="seaview_mat", help="Pre-computed distances matrix from seaview", default=None)
 parser.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
 parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
@@ -135,10 +136,15 @@ elif not os.path.isfile(str(args.embedding_file)):
 if os.path.isfile(str(args.embedding_file)):
     embedding = np.loadtxt(str(args.embedding_file), delimiter=",")
 else:
-    sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with t-SNE\n")
-    model = TSNE(n_components = args.dimensions, metric = "precomputed", n_iter=1000, verbose = 2, method = 'exact', learning_rate=1000, early_exaggeration = 4, n_iter_without_progress = 500, perplexity = 35)
-    embedding = model.fit_transform(distances)
+    # default is t-SNE
+    if not args.mds:
+        sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with t-SNE\n")
+        model = TSNE(n_components = args.dimensions, metric = "precomputed", n_iter=1000, verbose = 2, method = 'exact', learning_rate=1000, early_exaggeration = 4, n_iter_without_progress = 500, perplexity = 35)
+    else:
+        sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with MDS\n")
+        model = MDS(n_components = args.dimensions, metric=True, dissimilarity = "precomputed", verbose = 1)
 
+    embedding = model.fit_transform(distances)
     np.savetxt(str(args.output_prefix) + ".embedding.csv", embedding, delimiter=",")
 
 # Draw a k-distances plot
