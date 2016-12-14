@@ -20,7 +20,7 @@ separator = "\t"
 mash_chunk_size = 500
 
 # Functions
-def run_mash_sketch(file_names):
+def run_mash_sketch(file_names, kmer_size, sketch_size):
     # Needs to be done in chunks to prevent massive command lines
     mash_sep = " "
     for chunk in range(((len(file_names) - 1) // mash_chunk_size) + 1):
@@ -29,7 +29,7 @@ def run_mash_sketch(file_names):
         if chunk_end > len(file_names):
             chunk_end = len(file_names)
 
-        mash_command = str(args.mash_exec) + " sketch -o reference" + str(chunk) + " " + mash_sep.join(file_names[chunk_start:chunk_end])
+        mash_command = str(args.mash_exec) + " sketch -k " kmer_size " -s " sketch_size " -o reference" + str(chunk) + " " + mash_sep.join(file_names[chunk_start:chunk_end])
         retcode = subprocess.call(mash_command, shell=True)
         if retcode < 0:
             sys.stderr.write("Mash sketch failed with signal " + str(retcode) + "\n")
@@ -59,6 +59,8 @@ parser.add_argument("--seaview_mat",dest="seaview_mat", help="Pre-computed dista
 parser.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
 parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
 parser.add_argument("-m", "--mash", dest="mash_exec", help="Location of mash executable",default='mash')
+parser.add_argument("--kmer_size", dest="kmer_size", help="K-mer size for mash sketches", default="21")
+parser.add_argument("--sketch_size", dest="sketch_size", help="Size of mash sketch", default="1000")
 parser.add_argument("--min_pts", dest="min_pts", help="Minimum number of samples in each cluster",default=5, type=int)
 parser.add_argument("--epsilon", dest="epsilon", help="Distance between DBSCAN clusters (pick with knn_plot)",default=0.1,type=float)
 args = parser.parse_args()
@@ -114,7 +116,7 @@ elif not os.path.isfile(str(args.embedding_file)):
     distances = np.zeros((len(file_num), len(file_num)))
     try:
         if not os.path.isfile("reference.msh"):
-            run_mash_sketch(file_names)
+            run_mash_sketch(file_names, args.kmer_size, args.sketch_size)
 
         p = subprocess.Popen([str(args.mash_exec) + ' dist reference.msh reference.msh'], stdout=subprocess.PIPE, shell=True)
         for line in iter(p.stdout.readline, ''):
