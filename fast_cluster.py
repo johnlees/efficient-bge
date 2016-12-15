@@ -10,9 +10,10 @@ import csv
 
 import numpy as np
 from sklearn.manifold import TSNE,MDS
+from sklearn.decomposition import NMF
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN,AgglomerativeClustering
 import matplotlib.pyplot as plt
 import matplotlib.markers
 
@@ -29,7 +30,7 @@ def run_mash_sketch(file_names, kmer_size, sketch_size):
         if chunk_end > len(file_names):
             chunk_end = len(file_names)
 
-        mash_command = str(args.mash_exec) + " sketch -k " kmer_size " -s " sketch_size " -o reference" + str(chunk) + " " + mash_sep.join(file_names[chunk_start:chunk_end])
+        mash_command = str(args.mash_exec) + " sketch -k " + kmer_size + " -s " + sketch_size + " -o reference" + str(chunk) + " " + mash_sep.join(file_names[chunk_start:chunk_end])
         retcode = subprocess.call(mash_command, shell=True)
         if retcode < 0:
             sys.stderr.write("Mash sketch failed with signal " + str(retcode) + "\n")
@@ -50,19 +51,25 @@ def run_mash_sketch(file_names, kmer_size, sketch_size):
 
 # Get options
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+methods = parser.add_argument_group('Method')
+options = parser.add_argument_group('Method options')
+
 parser.add_argument("--assembly_file", help="Tab separated file with sample name and assembly location on each line")
 parser.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
-parser.add_argument("-d","--dimensions",dest="dimensions",help="Number of t-SNE dimensions to embed to",type=int,default=2)
 parser.add_argument("--dist_mat",dest="distmat", help="Pre-computed distances.csv.npy matrix", default=None)
-parser.add_argument("--mds", dest="mds", action='store_true', default=False, help="Use MDS instead of t-SNE")
 parser.add_argument("--seaview_mat",dest="seaview_mat", help="Pre-computed distances matrix from seaview", default=None)
 parser.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
 parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
-parser.add_argument("-m", "--mash", dest="mash_exec", help="Location of mash executable",default='mash')
-parser.add_argument("--kmer_size", dest="kmer_size", help="K-mer size for mash sketches", default="21")
-parser.add_argument("--sketch_size", dest="sketch_size", help="Size of mash sketch", default="1000")
-parser.add_argument("--min_pts", dest="min_pts", help="Minimum number of samples in each cluster",default=5, type=int)
-parser.add_argument("--epsilon", dest="epsilon", help="Distance between DBSCAN clusters (pick with knn_plot)",default=0.1,type=float)
+method.add_argument("--mds", dest="mds", action='store_true', default=False, help="Use MDS instead of t-SNE")
+method.add_argument("--nmf", dest="nmf", action='store_true', default=False, help="Use non-negative matrix factorisation instead of t-SNE")
+method.add_argument("--hier", dest="hier", action='store_true', default=False, help="Use heirarchical clustering instead of embedding")
+options.add_argument("-d","--dimensions",dest="dimensions",help="Number of t-SNE dimensions to embed to",type=int,default=2)
+options.add_argument("-m", "--mash", dest="mash_exec", help="Location of mash executable",default='mash')
+options.add_argument("--kmer_size", dest="kmer_size", help="K-mer size for mash sketches", default="21")
+options.add_argument("--sketch_size", dest="sketch_size", help="Size of mash sketch", default="1000")
+options.add_argument("--min_pts", dest="min_pts", help="Minimum number of samples in each cluster",default=5, type=int)
+options.add_argument("--epsilon", dest="epsilon", help="Distance between DBSCAN clusters (pick with knn_plot)",default=0.1,type=float)
+options.add_argument("--clusters", dest="clusters", help="Number of clusters to form if using hierarchical clustering", default=20, type=int)
 args = parser.parse_args()
 
 # Need one and only one of these inputs (XOR)
@@ -134,23 +141,27 @@ elif not os.path.isfile(str(args.embedding_file)):
 
     np.save(str(args.output_prefix) + ".distances.csv", distances)
 
-# Run t-SNE
+# Run embedding
 if os.path.isfile(str(args.embedding_file)):
     embedding = np.loadtxt(str(args.embedding_file), delimiter=",")
 else:
-    # default is t-SNE
-    if not args.mds:
-        sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with t-SNE\n")
-        model = TSNE(n_components = args.dimensions, metric = "precomputed", n_iter=1000, verbose = 2, method = 'exact', learning_rate=1000, early_exaggeration = 4, n_iter_without_progress = 500, perplexity = 35)
-    else:
+    # metric MDS
+    if args.mds:
         sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with MDS\n")
         model = MDS(n_components = args.dimensions, metric=True, dissimilarity = "precomputed", verbose = 1)
+    # non-negative matrix factorisation
+    elif args.nmf:
+        sys.stderr.write("Finding " + str(args.dimensions) + " factors with NMF\n")
+        model = NMF(args.dimensions, verbose = 1)
+    # default is t-SNE
+    else:
+        sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with t-SNE\n")
+        model = TSNE(n_components = args.dimensions, metric = "precomputed", n_iter=1000, verbose = 2, method = 'exact', learning_rate=1000, early_exaggeration = 4, n_iter_without_progress = 500, perplexity = 35)
 
     embedding = model.fit_transform(distances)
     np.savetxt(str(args.output_prefix) + ".embedding.csv", embedding, delimiter=",")
 
 # Draw a k-distances plot
-sys.stderr.write("Clustering samples with DBSCAN\n")
 embedding = StandardScaler().fit_transform(embedding)
 nbrs = NearestNeighbors(n_neighbors=args.min_pts, algorithm='kd_tree').fit(embedding)
 nbr_distances = nbrs.kneighbors(embedding)
@@ -165,26 +176,32 @@ plt.ylabel(str(args.min_pts) + '-NN distance')
 plt.savefig(args.output_prefix + '.k_distances.pdf')
 plt.close()
 
-# Run DBSCAN
-dbscan_clusters = DBSCAN(eps = args.epsilon, min_samples = args.min_pts).fit_predict(embedding)
+# Run clustering
+if args.hier:
+    sys.stderr.write("Finding " + args.dimensions + " clusters with hierarchical clustering\n")
+    found_clusters = AgglomerativeClustering(args.dimensions, affinity="precomputed", linkage="average").fit_predict(embedding)
+# Default is DBSCAN
+else:
+    sys.stderr.write("Clustering samples with DBSCAN\n")
+    found_clusters = DBSCAN(eps = args.epsilon, min_samples = args.min_pts).fit_predict(embedding)
+    sys.stderr.write("Found " + str(len(set(found_clusters))) + " clusters\n")
 
 # Write output (file for phandango)
-sys.stderr.write("Found " + str(len(set(dbscan_clusters))) + " clusters\n")
 csv_out = open(args.output_prefix + str(".csv"), 'w')
 csv_sep = ','
 
 csv_out.write(csv_sep.join(("name","cluster:o")) + "\n")
-for sample in range(0, dbscan_clusters.size):
-    csv_out.write(csv_sep.join((file_num[sample], str(dbscan_clusters[sample]))) + "\n")
+for sample in range(0, found_clusters.size):
+    csv_out.write(csv_sep.join((file_num[sample], str(found_clusters[sample]))) + "\n")
 
 csv_out.close()
 
 # Draw plot (see http://scikit-learn.org/stable/auto_examples/cluster/plot_dbscan.html)
-unique_labels = set(dbscan_clusters)
+unique_labels = set(found_clusters)
 colours = plt.cm.Spectral(np.linspace(0, 1, len(unique_labels)))
 markers = itertools.cycle(matplotlib.markers.MarkerStyle.filled_markers)
 for k, col in zip(unique_labels, colours):
-    class_member_mask = (dbscan_clusters == k)
+    class_member_mask = (found_clusters == k)
     xy = embedding[class_member_mask]
 
     if k == -1:
@@ -196,7 +213,7 @@ for k, col in zip(unique_labels, colours):
         plt.plot(xy[:, 0], xy[:, 1], marker=next(markers), markerfacecolor=col,
              markeredgecolor='k', markersize=10, linestyle='None')
 
-plt.title('Estimated number of clusters: %d' % len(set(dbscan_clusters)))
+plt.title('Estimated number of clusters: %d' % len(set(found_clusters)))
 plt.savefig(args.output_prefix + '.pdf')
 plt.close()
 
@@ -222,13 +239,13 @@ if os.path.isfile(str(args.baps_file)):
 
     # Compare with fast cluster results
     confusion_out = open(args.output_prefix + ".baps_confusion.txt", 'w')
-    confusion_out.write(separator.join(["BAPS cluster","Total in BAPS cluster"] + [str(x) for x in sorted(set(dbscan_clusters))]) + "\n")
+    confusion_out.write(separator.join(["BAPS cluster","Total in BAPS cluster"] + [str(x) for x in sorted(set(found_clusters))]) + "\n")
 
     score = 0
     for cluster in baps_clusters:
-        num_in_cluster = [0] * len(set(dbscan_clusters))
+        num_in_cluster = [0] * len(set(found_clusters))
         for lane in baps_sets[cluster-1]:
-            fast_cluster = dbscan_clusters[file_index[lane]]
+            fast_cluster = found_clusters[file_index[lane]]
             num_in_cluster[fast_cluster+1] += 1
 
         score += max(num_in_cluster)
