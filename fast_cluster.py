@@ -29,7 +29,7 @@ def run_mash_sketch(file_names, kmer_size, sketch_size):
         if chunk_end > len(file_names):
             chunk_end = len(file_names)
 
-        mash_command = str(args.mash_exec) + " sketch -k " kmer_size " -s " sketch_size " -o reference" + str(chunk) + " " + mash_sep.join(file_names[chunk_start:chunk_end])
+        mash_command = str(args.mash_exec) + " sketch -k " + kmer_size + " -s " + sketch_size + " -o reference" + str(chunk) + " " + mash_sep.join(file_names[chunk_start:chunk_end])
         retcode = subprocess.call(mash_command, shell=True)
         if retcode < 0:
             sys.stderr.write("Mash sketch failed with signal " + str(retcode) + "\n")
