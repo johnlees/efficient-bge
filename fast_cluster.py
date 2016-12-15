@@ -51,18 +51,19 @@ def run_mash_sketch(file_names, kmer_size, sketch_size):
 
 # Get options
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+io = parser.add_argument_group('Input/output')
 methods = parser.add_argument_group('Method')
 options = parser.add_argument_group('Method options')
 
-parser.add_argument("--assembly_file", help="Tab separated file with sample name and assembly location on each line")
-parser.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
-parser.add_argument("--dist_mat",dest="distmat", help="Pre-computed distances.csv.npy matrix", default=None)
-parser.add_argument("--seaview_mat",dest="seaview_mat", help="Pre-computed distances matrix from seaview", default=None)
-parser.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
-parser.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
-method.add_argument("--mds", dest="mds", action='store_true', default=False, help="Use MDS instead of t-SNE")
-method.add_argument("--nmf", dest="nmf", action='store_true', default=False, help="Use non-negative matrix factorisation instead of t-SNE")
-method.add_argument("--hier", dest="hier", action='store_true', default=False, help="Use heirarchical clustering instead of embedding")
+io.add_argument("--assembly_file", help="Tab separated file with sample name and assembly location on each line")
+io.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
+io.add_argument("--dist_mat",dest="distmat", help="Pre-computed distances.csv.npy matrix", default=None)
+io.add_argument("--seaview_mat",dest="seaview_mat", help="Pre-computed distances matrix from seaview", default=None)
+io.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
+io.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
+methods.add_argument("--mds", dest="mds", action='store_true', default=False, help="Use MDS instead of t-SNE")
+methods.add_argument("--nmf", dest="nmf", action='store_true', default=False, help="Use non-negative matrix factorisation instead of t-SNE")
+methods.add_argument("--hier", dest="hier", action='store_true', default=False, help="Use heirarchical clustering instead of embedding")
 options.add_argument("-d","--dimensions",dest="dimensions",help="Number of t-SNE dimensions to embed to",type=int,default=2)
 options.add_argument("-m", "--mash", dest="mash_exec", help="Location of mash executable",default='mash')
 options.add_argument("--kmer_size", dest="kmer_size", help="K-mer size for mash sketches", default="21")
@@ -117,7 +118,7 @@ elif os.path.isfile(str(args.seaview_mat)):
             distances[line_nr-1,:] = np.asarray(line[1:len(seaview_mat[0])])
         line_nr += 1
 
-elif not os.path.isfile(str(args.embedding_file)):
+elif not os.path.isfile(str(args.embedding_file)) and not args.hier:
     # Run mash
     sys.stderr.write("Calculating distances with mash\n")
     distances = np.zeros((len(file_num), len(file_num)))
@@ -152,7 +153,7 @@ else:
     # non-negative matrix factorisation
     elif args.nmf:
         sys.stderr.write("Finding " + str(args.dimensions) + " factors with NMF\n")
-        model = NMF(args.dimensions, verbose = 1)
+        model = NMF(args.dimensions)
     # default is t-SNE
     else:
         sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with t-SNE\n")
@@ -178,8 +179,8 @@ plt.close()
 
 # Run clustering
 if args.hier:
-    sys.stderr.write("Finding " + args.dimensions + " clusters with hierarchical clustering\n")
-    found_clusters = AgglomerativeClustering(args.dimensions, affinity="precomputed", linkage="average").fit_predict(embedding)
+    sys.stderr.write("Finding " + str(args.clusters) + " clusters with hierarchical clustering\n")
+    found_clusters = AgglomerativeClustering(args.clusters, affinity="precomputed", linkage="average").fit_predict(distances)
 # Default is DBSCAN
 else:
     sys.stderr.write("Clustering samples with DBSCAN\n")
@@ -246,7 +247,10 @@ if os.path.isfile(str(args.baps_file)):
         num_in_cluster = [0] * len(set(found_clusters))
         for lane in baps_sets[cluster-1]:
             fast_cluster = found_clusters[file_index[lane]]
-            num_in_cluster[fast_cluster+1] += 1
+            if not args.hier: # DBSCAN uses cluster = -1 for noise
+                num_in_cluster[fast_cluster+1] += 1
+            else: # others are 0-index based
+                num_in_cluster[fast_cluster] += 1
 
         score += max(num_in_cluster)
         confusion_out.write(separator.join([str(cluster), str(len(baps_sets[cluster-1]))] + [str(x) for x in num_in_cluster]) + "\n")
