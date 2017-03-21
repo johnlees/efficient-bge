@@ -7,12 +7,11 @@ import argparse
 import subprocess
 import itertools
 import csv
+import re
 
 import numpy as np
 from sklearn.decomposition import NMF
-from sklearn.cluster import DBSCAN,AgglomerativeClustering
 import matplotlib.pyplot as plt
-import matplotlib.markers
 
 separator = "\t"
 
@@ -21,32 +20,15 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 io = parser.add_argument_group('Input/output')
 options = parser.add_argument_group('Method options')
 
-# TODO add in sample names
-io.add_argument("--alignment", dest="alignment", help="csv of alignment (MxN), produced by bcftools")
-io.add_argument("--samples", dest="sample_names", help="sample names, in the same order as the alignment")
+io.add_argument("--vcf", dest="vcf", help="vcf file, readable by bcftools")
 io.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
 io.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
 options.add_argument("-m", "--mac", dest="min_mac", help="Minimum allele count",default=2, type=int)
-options.add_argument("--max_clusters", dest="max_clusters", help="Maximum number of clusters", default=100, type=int)
+options.add_argument("--max_clusters", dest="max_clusters", help="Maximum number of clusters", default=10, type=int)
+options.add_argument("--min_clusters", dest="min_clusters", help="Minimum number of clusters", default=2, type=int)
+options.add_argument("--regularisation", dest="alpha", help="Regularisation constant", default=0, type=float)
+options.add_argument("--reg_mixing", dest="mixing", help="Regularisation L1/L2 mixing", default=0, type=float)
 args = parser.parse_args()
-
-# Read in files
-#file_index = {}
-#file_name_index = {}
-#file_num = []
-#file_names = []
-#i = 0
-#
-#if os.path.isfile(str(args.assembly_file)):
-#    with open(str(args.assembly_file)) as f:
-#        for line in f:
-#            line = line.rstrip()
-#            (name, file_name) = line.split(separator)
-#            file_index[name] = i
-#            file_name_index[file_name] = i
-#            file_num.append(name)
-#            file_names.append(file_name)
-#            i += 1
 
 samples = []
 with open(str(args.sample_names)) as f:
@@ -56,32 +38,52 @@ with open(str(args.sample_names)) as f:
 
 # Read in alignment
 sys.stderr.write("Reading alignment\n")
-alignment = np.loadtxt(args.alignment, delimiter=',')
+tmp_csv = NamedTemporaryFile()
+bcftools_command = "bcftools norm -m - " + args.vcf + " | bcftools view -c " + str(args.min_mac) + ":minor - | bcftools query -f '[,%GT]\\n' - | sed 's/^,//' > " + tmp_csv.name()
+retcode = subprocess.call(bcftools_command, shell=True)
+if retcode < 0:
+    sys.stderr.write("bcftools conversion failed with code " + str(retcode) + "\n")
+    tmp_csv.close()
+    sys.exit(1)
+
+alignment = np.loadtxt(tmp_csv.name(), delimiter=',')
 alignment = np.transpose(alignment)
+tmp_csv.close()
+
+# Read in header
+p = subprocess.Popen(['bcftools view -h ' + args.vcf], stdout=subprocess.PIPE, shell=True)
+for line in iter(p.stdout.readline, ''):
+    line = line.decode('utf-8')
+    line = line.rstrip()
+    header_line = re.match("^#CHROM", line)
+    if header_line != None:
+        samples = line.split(separator)
+        del samples[0:8]
+        break
 
 # Run NMF
-num_clusters = 2
-sys.stderr.write("Running NMF on " + str(num_clusters) + " clusters\n")
-model = NMF(n_components = num_clusters, verbose = 3)
-decomposition = model.fit_transform(alignment)
+for num_clusters in range(args.min_clusters, args.max_clusters):
+    sys.stderr.write("Running NMF on " + str(len(samples)) + " samples with " + str(num_clusters) + " clusters\n")
+    model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = args.alpha, l1_ratio = args.mixing, verbose = 2)
+    decomposition = model.fit_transform(alignment)
 
-# normalise each row by dividing by its sum
-# TODO assign to max val, unless close to others in which case bin
-clusters = np.argmax(decomposition, axis = 1)
-decomposition = decomposition/decomposition.sum(axis=1, keepdims = True)
+    # normalise each row by dividing by its sum
+    # TODO assign to max val, unless close to others in which case bin
+    clusters = np.argmax(decomposition, axis = 1)
+    decomposition = decomposition/decomposition.sum(axis=1, keepdims = True)
 
-print(clusters)
-print(decomposition)
+    print(clusters)
+    print(decomposition)
 
-# Write output (file for phandango)
-csv_out = open(args.output_prefix + str(".csv"), 'w')
-csv_sep = ','
+    # Write output (file for phandango)
+    csv_out = open(args.output_prefix + "." + str(num_clusters) + "clusters.csv", 'w')
+    csv_sep = ','
 
-csv_out.write(csv_sep.join(("name","cluster:o")) + "\n")
-for sample in range(0, clusters.size):
-    csv_out.write(csv_sep.join((samples[sample], str(clusters[sample]))) + "\n")
+    csv_out.write(csv_sep.join(("name","cluster:o")) + "\n")
+    for sample in range(0, clusters.size):
+        csv_out.write(csv_sep.join((samples[sample], str(clusters[sample]))) + "\n")
 
-csv_out.close()
+    csv_out.close()
 
 #TODO
 # Draw stacked bar plot
