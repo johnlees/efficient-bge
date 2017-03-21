@@ -8,6 +8,7 @@ import subprocess
 import itertools
 import csv
 import re
+import tempfile
 
 import numpy as np
 from sklearn.decomposition import NMF
@@ -19,6 +20,7 @@ separator = "\t"
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 io = parser.add_argument_group('Input/output')
 options = parser.add_argument_group('Method options')
+plot = parser.add_argument_group('Plot options')
 
 io.add_argument("-v","--vcf", dest="vcf", help="vcf file, readable by bcftools")
 io.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
@@ -29,25 +31,20 @@ options.add_argument("--max_clusters", dest="max_clusters", help="Maximum number
 options.add_argument("--min_clusters", dest="min_clusters", help="Minimum number of clusters", default=2, type=int)
 options.add_argument("--regularisation", dest="alpha", help="Regularisation constant", default=0, type=float)
 options.add_argument("--reg_mixing", dest="mixing", help="Regularisation L1/L2 mixing", default=0, type=float)
+plot.add_argument("--structure", dest="structure", help="Create structure-like plots for all clusterings", action='store_true', default=False)
 args = parser.parse_args()
-
-samples = []
-with open(str(args.sample_names)) as f:
-    for line in f:
-        line = line.rstrip()
-        samples.append(line)
 
 # Read in alignment
 sys.stderr.write("Reading alignment\n")
-tmp_csv = NamedTemporaryFile()
-bcftools_command = "bcftools norm -m - " + args.vcf + " | bcftools view -c " + str(args.min_mac) + ":minor - | bcftools query -f '[,%GT]\\n' - | sed 's/^,//' > " + tmp_csv.name()
+tmp_csv = tempfile.NamedTemporaryFile()
+bcftools_command = "bcftools norm -m - " + args.vcf + " | bcftools view -c " + str(args.min_mac) + ":minor - | bcftools query -f '[,%GT]\\n' - | sed 's/^,//' > " + tmp_csv.name
 retcode = subprocess.call(bcftools_command, shell=True)
 if retcode < 0:
     sys.stderr.write("bcftools conversion failed with code " + str(retcode) + "\n")
     tmp_csv.close()
     sys.exit(1)
 
-alignment = np.loadtxt(tmp_csv.name(), delimiter=',')
+alignment = np.loadtxt(tmp_csv.name, delimiter=',')
 alignment = np.transpose(alignment)
 tmp_csv.close()
 
@@ -59,14 +56,14 @@ for line in iter(p.stdout.readline, ''):
     header_line = re.match("^#CHROM", line)
     if header_line != None:
         samples = line.split(separator)
-        del samples[0:8]
+        del samples[0:9]
         break
 
 # For all cluster sizes
-for num_clusters in range(args.min_clusters, args.max_clusters):
+for num_clusters in range(args.min_clusters, args.max_clusters + 1):
     # Run NMF
     sys.stderr.write("Running NMF on " + str(len(samples)) + " samples with " + str(num_clusters) + " clusters\n")
-    model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = args.alpha, l1_ratio = args.mixing, verbose = 1)
+    model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = args.alpha, l1_ratio = args.mixing, verbose = 0)
     decomposition = model.fit_transform(alignment)
 
     # normalise each row by dividing by its sum
@@ -87,25 +84,37 @@ for num_clusters in range(args.min_clusters, args.max_clusters):
     csv_out.close()
 
     # Draw structure plot
-    # first sort by assigned cluster
-    sort_order = np.argsort(clusters)
+    if args.structure == True:
+        # first sort by assigned cluster
+        sort_order = np.argsort(clusters)
 
-    bars = []
-    ind = np.arrange(len(samples))
-    colours = plt.cm.Spectral(np.linspace(0, 1, num_clusters))
-    width = 1
-    for cluster in range(0, num_clusters-1):
-        if cluster == 0:
-            bars[cluster] = plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster])
-        else:
-            bars[cluster] = plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],
-                    bottom=decomposition[sort_order,cluster-1])
+        bars = []
+        ind = np.arange(len(samples))
+        colours = plt.cm.Spectral(np.linspace(0, 1, num_clusters))
+        width = 1
 
-    plt.title('Structure plot for %d clusters' % num_clusters)
-    plt.ylabel('Assigned weight')
-    plt.xlabel('Samples')
-    plt.savefig(args.output_prefix + "." + str(num_clusters) + "clusters.structure.pdf")
-    plt.close()
+        for cluster in range(0, num_clusters):
+            if cluster == 0:
+                bars.append(plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],))
+                bottoms = decomposition[sort_order,cluster]
+            else:
+                bars.append(plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],
+                        bottom=bottoms))
+                bottoms += decomposition[sort_order,cluster]
+
+        plt.title('Structure plot for %d clusters' % num_clusters)
+        plt.ylabel('Assigned weight')
+        plt.xlabel('Samples')
+        plt.ylim([0,1])
+        plt.xlim([0,len(samples)])
+        plt.tick_params(
+            axis='y',
+            which='both',
+            left='off',
+            right='off',
+            labelbottom='off')
+        plt.savefig(args.output_prefix + "." + str(num_clusters) + "clusters.structure.pdf")
+        plt.close()
 
 #TODO draw distances for each cluster
 
