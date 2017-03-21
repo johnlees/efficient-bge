@@ -136,18 +136,19 @@ if len(divergences) > 1:
     best_clusters = args.min_clusters + divergences.index(min(divergences))
     sys.stderr.write("Minimum divergence " + str(min(divergences)) + " at " + str(best_clusters) + " clusters\n")
 
-    colours = ['blue', 'red']
+    colours = ['red', 'blue']
     levels = [0, 1]
     min_colours = np.where(divergences == min(divergences), 0, 1)
     cmap, norm = matplotlib.colors.from_levels_and_colors(levels=levels, colors=colours, extend='max')
 
     cluster_vals = np.arange(args.min_clusters, args.max_clusters + 1)
     plt.plot(cluster_vals, divergences, 'k')
-    plt.scatter(cluster_vals, divergences, c=min_colours, cmap=cmap, norm=norm)
+    plt.scatter(cluster_vals, divergences, s=40, c=min_colours, cmap=cmap, norm=norm)
 
-    plt.title('Divergence for different numbers of clusters')
-    plt.ylabel('Number of clusters')
-    plt.xlabel('Divergence')
+    plt.title('Lowest divergence at %d clusters' % best_clusters)
+    plt.xlabel('Number of clusters')
+    plt.ylabel('Divergence')
+    plt.xticks(cluster_vals, cluster_vals)
     plt.savefig(args.output_prefix + ".divergences.pdf")
     plt.close()
 
