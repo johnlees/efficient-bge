@@ -10,8 +10,9 @@ import csv
 
 import numpy as np
 
+import ef_cluster
+
 separator = "\t"
-mash_chunk_size = 500
 
 # Get options
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -85,7 +86,7 @@ else:
     distances = np.zeros((len(file_num), len(file_num)))
     try:
         if not os.path.isfile("reference.msh"):
-            run_mash_sketch(file_names, args.kmer_size, args.sketch_size)
+            ef_cluster.run_mash_sketch("mash", file_names, args.kmer_size, args.sketch_size)
 
         p = subprocess.Popen([str(args.mash_exec) + ' dist reference.msh reference.msh'], stdout=subprocess.PIPE, shell=True)
         for line in iter(p.stdout.readline, ''):
@@ -97,8 +98,8 @@ else:
                     pos1 = samples.index(file_num[file_names.index(name1)])
                     pos2 = samples.index(file_num[file_names.index(name2)])
                 else:
-                    pos1 = file_num[file_names.index(name1)]
-                    pos2 = file_num[file_names.index(name2)]
+                    pos1 = file_names.index(name1)
+                    pos2 = file_names.index(name2)
 
                 if distances[pos1, pos2] == 0:
                     distances[pos1, pos2] = dist

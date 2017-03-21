@@ -7,12 +7,12 @@ import argparse
 import subprocess
 import itertools
 import csv
-import re
 import tempfile
 
 import numpy as np
 from sklearn.decomposition import NMF
 import matplotlib.pyplot as plt
+import matplotlib.colors
 
 import ef_cluster
 
@@ -78,13 +78,13 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
 
     # evaluate cluster distances
     if os.path.isfile(args.dist_mat):
-        ind_mat = np.zeros(len(samples), num_clusters)
+        ind_mat = np.zeros((len(samples), num_clusters))
         for cluster in range(0, num_clusters):
             ind_mat[clusters == cluster, cluster] = 1
-        cluster_mat = np.dot(ind_mat, ind_mat)
-        cluster_mat = cluster_mat/cluster_mat.sum
+        cluster_mat = np.dot(ind_mat, np.transpose(ind_mat))
+        cluster_mat = cluster_mat/cluster_mat.sum()
 
-        divergence = np.linalg.norm(cluster_mat - dist_mat)
+        divergence = np.linalg.norm(cluster_mat - distances)
         sys.stderr.write("Divergence between clusters and distances is " + str(divergence) + "\n")
         divergences.append(divergence)
 
@@ -132,18 +132,18 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
         plt.close()
 
 # draw distances for each cluster
-if len(divergences > 1):
-    best_clusters = args.min_clusters + divergences.index(min(divergences)) - 1
+if len(divergences) > 1:
+    best_clusters = args.min_clusters + divergences.index(min(divergences))
     sys.stderr.write("Minimum divergence " + str(min(divergences)) + " at " + str(best_clusters) + " clusters\n")
 
     colours = ['blue', 'red']
     levels = [0, 1]
     min_colours = np.where(divergences == min(divergences), 0, 1)
-    cmap, norm = plt.colors.from_levels_and_colors(levels=levels, colors=colours, extend='max')
+    cmap, norm = matplotlib.colors.from_levels_and_colors(levels=levels, colors=colours, extend='max')
 
     cluster_vals = np.arange(args.min_clusters, args.max_clusters + 1)
     plt.plot(cluster_vals, divergences, 'k')
-    plt.plot(cluster_vals, divergences, 'o', c=min_colours, cmap=cmap, norm=norm)
+    plt.scatter(cluster_vals, divergences, c=min_colours, cmap=cmap, norm=norm)
 
     plt.title('Divergence for different numbers of clusters')
     plt.ylabel('Number of clusters')

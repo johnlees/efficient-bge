@@ -20,7 +20,6 @@ import matplotlib.markers
 import ef_cluster
 
 separator = "\t"
-mash_chunk_size = 500
 
 # Get options
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -97,7 +96,7 @@ elif not os.path.isfile(str(args.embedding_file)) and not args.hier:
     distances = np.zeros((len(file_num), len(file_num)))
     try:
         if not os.path.isfile("reference.msh"):
-            ef_cluster.run_mash_sketch(file_names, args.kmer_size, args.sketch_size)
+            ef_cluster.run_mash_sketch(args.mash_exec, file_names, args.kmer_size, args.sketch_size)
 
         p = subprocess.Popen([str(args.mash_exec) + ' dist reference.msh reference.msh'], stdout=subprocess.PIPE, shell=True)
         for line in iter(p.stdout.readline, ''):
