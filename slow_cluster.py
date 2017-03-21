@@ -20,8 +20,9 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 io = parser.add_argument_group('Input/output')
 options = parser.add_argument_group('Method options')
 
-io.add_argument("--vcf", dest="vcf", help="vcf file, readable by bcftools")
+io.add_argument("-v","--vcf", dest="vcf", help="vcf file, readable by bcftools")
 io.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
+io.add_argument("-d","--distances", dest="dist_mat", help="Pairwise distance matrix", default=None)
 io.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
 options.add_argument("-m", "--mac", dest="min_mac", help="Minimum allele count",default=2, type=int)
 options.add_argument("--max_clusters", dest="max_clusters", help="Maximum number of clusters", default=10, type=int)
@@ -61,10 +62,11 @@ for line in iter(p.stdout.readline, ''):
         del samples[0:8]
         break
 
-# Run NMF
+# For all cluster sizes
 for num_clusters in range(args.min_clusters, args.max_clusters):
+    # Run NMF
     sys.stderr.write("Running NMF on " + str(len(samples)) + " samples with " + str(num_clusters) + " clusters\n")
-    model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = args.alpha, l1_ratio = args.mixing, verbose = 2)
+    model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = args.alpha, l1_ratio = args.mixing, verbose = 1)
     decomposition = model.fit_transform(alignment)
 
     # normalise each row by dividing by its sum
@@ -72,8 +74,7 @@ for num_clusters in range(args.min_clusters, args.max_clusters):
     clusters = np.argmax(decomposition, axis = 1)
     decomposition = decomposition/decomposition.sum(axis=1, keepdims = True)
 
-    print(clusters)
-    print(decomposition)
+    # TODO evaluate cluster distances
 
     # Write output (file for phandango)
     csv_out = open(args.output_prefix + "." + str(num_clusters) + "clusters.csv", 'w')
@@ -85,27 +86,28 @@ for num_clusters in range(args.min_clusters, args.max_clusters):
 
     csv_out.close()
 
-#TODO
-# Draw stacked bar plot
-#unique_labels = set(found_clusters)
-#colours = plt.cm.Spectral(np.linspace(0, 1, len(unique_labels)))
-#markers = itertools.cycle(matplotlib.markers.MarkerStyle.filled_markers)
-#for k, col in zip(unique_labels, colours):
-#    class_member_mask = (found_clusters == k)
-#    xy = embedding[class_member_mask]
-#
-#    if k == -1:
-#        # Black used for noise.
-#        col = 'k'
-#        plt.plot(xy[:, 0], xy[:, 1], marker='o', markerfacecolor=col,
-#             markeredgecolor='k', markersize=6, linestyle='None')
-#    else:
-#        plt.plot(xy[:, 0], xy[:, 1], marker=next(markers), markerfacecolor=col,
-#             markeredgecolor='k', markersize=10, linestyle='None')
-#
-#plt.title('Estimated number of clusters: %d' % len(set(found_clusters)))
-#plt.savefig(args.output_prefix + '.pdf')
-#plt.close()
+    # Draw structure plot
+    # first sort by assigned cluster
+    sort_order = np.argsort(clusters)
+
+    bars = []
+    ind = np.arrange(len(samples))
+    colours = plt.cm.Spectral(np.linspace(0, 1, num_clusters))
+    width = 1
+    for cluster in range(0, num_clusters-1):
+        if cluster == 0:
+            bars[cluster] = plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster])
+        else:
+            bars[cluster] = plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],
+                    bottom=decomposition[sort_order,cluster-1])
+
+    plt.title('Structure plot for %d clusters' % num_clusters)
+    plt.ylabel('Assigned weight')
+    plt.xlabel('Samples')
+    plt.savefig(args.output_prefix + "." + str(num_clusters) + "clusters.structure.pdf")
+    plt.close()
+
+#TODO draw distances for each cluster
 
 #TODO
 # Compare with BAPS, if provided
