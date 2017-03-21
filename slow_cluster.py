@@ -14,6 +14,8 @@ import numpy as np
 from sklearn.decomposition import NMF
 import matplotlib.pyplot as plt
 
+import ef_cluster
+
 separator = "\t"
 
 # Get options
@@ -34,6 +36,18 @@ options.add_argument("--reg_mixing", dest="mixing", help="Regularisation L1/L2 m
 plot.add_argument("--structure", dest="structure", help="Create structure-like plots for all clusterings", action='store_true', default=False)
 args = parser.parse_args()
 
+# Read in header
+samples = ef_cluster.read_header(args.vcf)
+
+# Read in distances
+if os.path.isfile(args.dist_mat):
+    sys.stderr.write("Reading distance matrix\n")
+    distances = np.load(args.dist_mat)
+    # check size matches data (other checks in make_distance)
+    if (distances.shape[0] != len(samples) or distances.shape[1] != len(samples)):
+        sys.stderr.write("Sample size of distance matrix does not match vcf\n")
+        sys.exit(1)
+
 # Read in alignment
 sys.stderr.write("Reading alignment\n")
 tmp_csv = tempfile.NamedTemporaryFile()
@@ -48,18 +62,8 @@ alignment = np.loadtxt(tmp_csv.name, delimiter=',')
 alignment = np.transpose(alignment)
 tmp_csv.close()
 
-# Read in header
-p = subprocess.Popen(['bcftools view -h ' + args.vcf], stdout=subprocess.PIPE, shell=True)
-for line in iter(p.stdout.readline, ''):
-    line = line.decode('utf-8')
-    line = line.rstrip()
-    header_line = re.match("^#CHROM", line)
-    if header_line != None:
-        samples = line.split(separator)
-        del samples[0:9]
-        break
-
 # For all cluster sizes
+divergences = []
 for num_clusters in range(args.min_clusters, args.max_clusters + 1):
     # Run NMF
     sys.stderr.write("Running NMF on " + str(len(samples)) + " samples with " + str(num_clusters) + " clusters\n")
@@ -68,10 +72,21 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
 
     # normalise each row by dividing by its sum
     # TODO assign to max val, unless close to others in which case bin
+    # this could be done using entropy/diversity?
     clusters = np.argmax(decomposition, axis = 1)
     decomposition = decomposition/decomposition.sum(axis=1, keepdims = True)
 
-    # TODO evaluate cluster distances
+    # evaluate cluster distances
+    if os.path.isfile(args.dist_mat):
+        ind_mat = np.zeros(len(samples), num_clusters)
+        for cluster in range(0, num_clusters):
+            ind_mat[clusters == cluster, cluster] = 1
+        cluster_mat = np.dot(ind_mat, ind_mat)
+        cluster_mat = cluster_mat/cluster_mat.sum
+
+        divergence = np.linalg.norm(cluster_mat - dist_mat)
+        sys.stderr.write("Divergence between clusters and distances is " + str(divergence) + "\n")
+        divergences.append(divergence)
 
     # Write output (file for phandango)
     csv_out = open(args.output_prefix + "." + str(num_clusters) + "clusters.csv", 'w')
@@ -116,7 +131,25 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
         plt.savefig(args.output_prefix + "." + str(num_clusters) + "clusters.structure.pdf")
         plt.close()
 
-#TODO draw distances for each cluster
+# draw distances for each cluster
+if len(divergences > 1):
+    best_clusters = args.min_clusters + divergences.index(min(divergences)) - 1
+    sys.stderr.write("Minimum divergence " + str(min(divergences)) + " at " + str(best_clusters) + " clusters\n")
+
+    colours = ['blue', 'red']
+    levels = [0, 1]
+    min_colours = np.where(divergences == min(divergences), 0, 1)
+    cmap, norm = plt.colors.from_levels_and_colors(levels=levels, colors=colours, extend='max')
+
+    cluster_vals = np.arange(args.min_clusters, args.max_clusters + 1)
+    plt.plot(cluster_vals, divergences, 'k')
+    plt.plot(cluster_vals, divergences, 'o', c=min_colours, cmap=cmap, norm=norm)
+
+    plt.title('Divergence for different numbers of clusters')
+    plt.ylabel('Number of clusters')
+    plt.xlabel('Divergence')
+    plt.savefig(args.output_prefix + ".divergences.pdf")
+    plt.close()
 
 #TODO
 # Compare with BAPS, if provided

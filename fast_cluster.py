@@ -17,37 +17,10 @@ from sklearn.cluster import DBSCAN,AgglomerativeClustering
 import matplotlib.pyplot as plt
 import matplotlib.markers
 
+import ef_cluster
+
 separator = "\t"
 mash_chunk_size = 500
-
-# Functions
-def run_mash_sketch(file_names, kmer_size, sketch_size):
-    # Needs to be done in chunks to prevent massive command lines
-    mash_sep = " "
-    for chunk in range(((len(file_names) - 1) // mash_chunk_size) + 1):
-        chunk_start = chunk * mash_chunk_size
-        chunk_end = (chunk+1) * mash_chunk_size
-        if chunk_end > len(file_names):
-            chunk_end = len(file_names)
-
-        mash_command = str(args.mash_exec) + " sketch -k " + kmer_size + " -s " + sketch_size + " -o reference" + str(chunk) + " " + mash_sep.join(file_names[chunk_start:chunk_end])
-        retcode = subprocess.call(mash_command, shell=True)
-        if retcode < 0:
-            sys.stderr.write("Mash sketch failed with signal " + str(retcode) + "\n")
-            sys.exit(1)
-
-    if (len(file_names) // mash_chunk_size) > 0:
-        paste_join = ".msh reference"
-        mash_paste_command = str(args.mash_exec) + " paste reference reference" + paste_join.join([str(chunk) for chunk in range(((len(file_names) - 1) // mash_chunk_size) + 1)]) + ".msh"
-        retcode = subprocess.call(mash_paste_command, shell=True)
-        if retcode < 0:
-            sys.stderr.write("Mash paste failed with signal " + str(retcode) + "\n")
-            sys.exit(1)
-        else:
-            for chunk in range(((len(file_names) - 1) // mash_chunk_size) + 1):
-                os.remove("reference" + str(chunk) + ".msh")
-    else:
-        os.rename("reference0.msh", "reference.msh")
 
 # Get options
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -124,7 +97,7 @@ elif not os.path.isfile(str(args.embedding_file)) and not args.hier:
     distances = np.zeros((len(file_num), len(file_num)))
     try:
         if not os.path.isfile("reference.msh"):
-            run_mash_sketch(file_names, args.kmer_size, args.sketch_size)
+            ef_cluster.run_mash_sketch(file_names, args.kmer_size, args.sketch_size)
 
         p = subprocess.Popen([str(args.mash_exec) + ' dist reference.msh reference.msh'], stdout=subprocess.PIPE, shell=True)
         for line in iter(p.stdout.readline, ''):
