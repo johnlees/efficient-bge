@@ -91,7 +91,7 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
     # bin high entropy samples
     # note stats.entropy([1/num_clusters] * num_clusters = -log_2(1/N)
     if not args.max_entropy == None:
-        sys.stderr.write("Max possible entropy " + "{0:.2f}".format(-log(1/num_clusters,2))
+        sys.stderr.write("Max possible entropy " + "{0:.2f}".format(stats.entropy([1/num_clusters] * num_clusters))
                 + "; binning over " + str(args.max_entropy) + "\n")
         sample_entropy = np.apply_along_axis(stats.entropy, 1, decomposition)
         clusters[sample_entropy > args.max_entropy] = -1
@@ -133,9 +133,12 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
                         bottom=bottoms))
                 bottoms += decomposition[sort_order,cluster]
 
-        # draw breaks
+        # draw breaks between clusters
         for line in breaks:
-            plt.axvline(line, linewidth=2, color='w', linestyle='dashed')
+            if line == breaks[1] and clusters[sort_order[0]] == -1: # bin cluster
+                plt.axvline(line, linewidth=2, color='r', linestyle='dashed')
+            elif not line == 0:
+                plt.axvline(line, linewidth=2, color='w', linestyle='dashed')
 
         plt.title('Structure plot for %d clusters' % num_clusters)
         plt.ylabel('Assigned weight')
