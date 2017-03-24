@@ -2,6 +2,7 @@
 # -*- coding: ASCII -*-
 #
 
+# python libs
 import os,sys
 import argparse
 import subprocess
@@ -9,19 +10,32 @@ import itertools
 import csv
 import tempfile
 
+# multithreading
+from multiprocessing.pool import ThreadPool
+import threading
+import time
+
+# external libraries
 import numpy as np
 from scipy import stats
 from sklearn.decomposition import NMF
 import matplotlib.pyplot as plt
 import matplotlib.colors
 
+# internal libraries
 import ef_cluster
 
 separator = "\t"
+sleep_time = 0.1
+
+def run_nmf(alignment, num_clusters, alpha, mixing):
+    model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = alpha, l1_ratio = mixing, verbose = 0)
+    return(model.fit_transform(alignment))
 
 # Get options
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 io = parser.add_argument_group('Input/output')
+efficiency = parser.add_argument_group('Efficiency options')
 options = parser.add_argument_group('Method options')
 plot = parser.add_argument_group('Plot options')
 
@@ -29,6 +43,7 @@ io.add_argument("-v","--vcf", dest="vcf", help="vcf file, readable by bcftools")
 io.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
 io.add_argument("-d","--distances", dest="dist_mat", help="Pairwise distance matrix", default=None)
 io.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
+efficiency.add_argument("-t", "--threads", dest="threads", help="Number of threads to use", type=int, default=1)
 options.add_argument("-m", "--mac", dest="min_mac", help="Minimum allele count",default=2, type=int)
 options.add_argument("--max_clusters", dest="max_clusters", help="Maximum number of clusters", default=10, type=int)
 options.add_argument("--min_clusters", dest="min_clusters", help="Minimum number of clusters", default=2, type=int)
@@ -64,13 +79,21 @@ alignment = np.loadtxt(tmp_csv.name, delimiter=',')
 alignment = np.transpose(alignment)
 tmp_csv.close()
 
-# For all cluster sizes
-divergences = []
+# For all cluster sizes, run NMF in parallel
+sys.stderr.write("Running NMF on " + str(len(samples)) + " samples with " + str(args.max_clusters - args.min_clusters + 1) + " cluster sizes\n")
+pool = ThreadPool(processes=args.threads)
+nmf_results = []
 for num_clusters in range(args.min_clusters, args.max_clusters + 1):
-    # Run NMF
-    sys.stderr.write("Running NMF on " + str(len(samples)) + " samples with " + str(num_clusters) + " clusters\n")
-    model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = args.alpha, l1_ratio = args.mixing, verbose = 0)
-    decomposition = model.fit_transform(alignment)
+    nmf_results.append(pool.apply_async(run_nmf, (alignment, num_clusters, args.alpha, args.mixing)))
+
+# Wait for NMF to complete
+while not(all(a_thread.ready() for a_thread in nmf_results)):
+    time.sleep(sleep_time) # or 'pass' to not wait
+
+# Collect results
+divergences = []
+for clustering_results, num_clusters in zip(nmf_results, range(args.min_clusters, args.max_clusters + 1)):
+    decomposition = clustering_results.get()
 
     # assign to max val cluster, normalise each row by dividing by its sum
     clusters = np.argmax(decomposition, axis = 1)
@@ -85,7 +108,7 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
         cluster_mat = cluster_mat/cluster_mat.sum()
 
         divergence = np.linalg.norm(cluster_mat - distances)
-        sys.stderr.write("Divergence between clusters and distances is " + str(divergence) + "\n")
+        sys.stderr.write("Divergence between " + str(num_clusters) + " clusters and distances is " + str(divergence) + "\n")
         divergences.append(divergence)
 
     # bin high entropy samples
