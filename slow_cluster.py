@@ -10,6 +10,7 @@ import csv
 import tempfile
 
 import numpy as np
+from scipy import stats
 from sklearn.decomposition import NMF
 import matplotlib.pyplot as plt
 import matplotlib.colors
@@ -31,6 +32,7 @@ io.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for compa
 options.add_argument("-m", "--mac", dest="min_mac", help="Minimum allele count",default=2, type=int)
 options.add_argument("--max_clusters", dest="max_clusters", help="Maximum number of clusters", default=10, type=int)
 options.add_argument("--min_clusters", dest="min_clusters", help="Minimum number of clusters", default=2, type=int)
+options.add_argument("--entropy", dest="max_entropy", help="Samples with an entropy higher than this will be assigned to a bin cluster", default=None, type=float)
 options.add_argument("--regularisation", dest="alpha", help="Regularisation constant", default=0, type=float)
 options.add_argument("--reg_mixing", dest="mixing", help="Regularisation L1/L2 mixing", default=0, type=float)
 plot.add_argument("--structure", dest="structure", help="Create structure-like plots for all clusterings", action='store_true', default=False)
@@ -70,9 +72,7 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
     model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = args.alpha, l1_ratio = args.mixing, verbose = 0)
     decomposition = model.fit_transform(alignment)
 
-    # normalise each row by dividing by its sum
-    # TODO assign to max val, unless close to others in which case bin
-    # this could be done using entropy/diversity?
+    # assign to max val cluster, normalise each row by dividing by its sum
     clusters = np.argmax(decomposition, axis = 1)
     decomposition = decomposition/decomposition.sum(axis=1, keepdims = True)
 
@@ -88,6 +88,14 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
         sys.stderr.write("Divergence between clusters and distances is " + str(divergence) + "\n")
         divergences.append(divergence)
 
+    # bin high entropy samples
+    # note stats.entropy([1/num_clusters] * num_clusters = -log_2(1/N)
+    if not args.max_entropy == None:
+        sys.stderr.write("Max possible entropy " + "{0:.2f}".format(-log(1/num_clusters,2))
+                + "; binning over " + str(args.max_entropy) + "\n")
+        sample_entropy = np.apply_along_axis(stats.entropy, 1, decomposition)
+        clusters[sample_entropy > args.max_entropy] = -1
+
     # Write output (file for phandango)
     csv_out = open(args.output_prefix + "." + str(num_clusters) + "clusters.csv", 'w')
     csv_sep = ','
@@ -100,14 +108,22 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
 
     # Draw structure plot
     if args.structure == True:
-        # first sort by assigned cluster
+        # first sort by assigned cluster, find breaks
         sort_order = np.argsort(clusters)
 
-        bars = []
+        breaks = []
+        prev = None
+        for sample, sample_idx in zip(sort_order, range(0, clusters.size)):
+            if not clusters[sample] == prev:
+                breaks.append(sample_idx)
+                prev = clusters[sample]
+
+        bars = [] # In case I add a legend at some point
         ind = np.arange(len(samples))
         colours = plt.cm.Spectral(np.linspace(0, 1, num_clusters))
         width = 1
 
+        # draw stacked bar
         for cluster in range(0, num_clusters):
             if cluster == 0:
                 bars.append(plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],))
@@ -116,6 +132,10 @@ for num_clusters in range(args.min_clusters, args.max_clusters + 1):
                 bars.append(plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],
                         bottom=bottoms))
                 bottoms += decomposition[sort_order,cluster]
+
+        # draw breaks
+        for line in breaks:
+            plt.axvline(line, linewidth=2, color='w', linestyle='dashed')
 
         plt.title('Structure plot for %d clusters' % num_clusters)
         plt.ylabel('Assigned weight')
