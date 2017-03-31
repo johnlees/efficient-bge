@@ -26,11 +26,20 @@ import matplotlib.colors
 import ef_cluster
 
 separator = "\t"
-sleep_time = 0.1
+sleep_time = 0.01
 
+# Functions
 def run_nmf(alignment, num_clusters, alpha, mixing):
     model = NMF(n_components = num_clusters, init = 'nndsvd', alpha = alpha, l1_ratio = mixing, verbose = 0)
     return(model.fit_transform(alignment))
+
+def write_csv(file_name, clusters, samples):
+    csv_out = open(file_name, 'w')
+    csv_sep = ','
+
+    csv_out.write(csv_sep.join(("name","cluster:o")) + "\n")
+    for sample in range(0, len(clusters)):
+        csv_out.write(csv_sep.join((samples[sample], str(clusters[sample]))) + "\n")
 
 # Get options
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -42,9 +51,11 @@ plot = parser.add_argument_group('Plot options')
 io.add_argument("-v","--vcf", dest="vcf", help="vcf file, readable by bcftools")
 io.add_argument("-o","--output", dest="output_prefix", help="Output prefix", default="clusters")
 io.add_argument("-d","--distances", dest="dist_mat", help="Pairwise distance matrix", default=None)
-io.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
+io.add_argument("--verbose", dest="verbose", help="Print verbose messages to stderr", action='store_true', default=False)
+io.add_argument("--write_all", dest="write_all", help="Write all clusterings computed", action='store_true', default=False)
 efficiency.add_argument("-t", "--threads", dest="threads", help="Number of threads to use", type=int, default=1)
-options.add_argument("-m", "--mac", dest="min_mac", help="Minimum allele count",default=2, type=int)
+options.add_argument("--hier", dest="hier", help="Depth of clustering to perform",default=1, type=int)
+options.add_argument("--mac", dest="min_mac", help="Minimum allele count",default=2, type=int)
 options.add_argument("--max_clusters", dest="max_clusters", help="Maximum number of clusters", default=10, type=int)
 options.add_argument("--min_clusters", dest="min_clusters", help="Minimum number of clusters", default=2, type=int)
 options.add_argument("--entropy", dest="max_entropy", help="Samples with an entropy higher than this will be assigned to a bin cluster", default=None, type=float)
@@ -79,163 +90,180 @@ alignment = np.loadtxt(tmp_csv.name, delimiter=',')
 alignment = np.transpose(alignment)
 tmp_csv.close()
 
-# For all cluster sizes, run NMF in parallel
-sys.stderr.write("Running NMF on " + str(len(samples)) + " samples with " + str(args.max_clusters - args.min_clusters + 1) + " cluster sizes\n")
-pool = ThreadPool(processes=args.threads)
-nmf_results = []
-for num_clusters in range(args.min_clusters, args.max_clusters + 1):
-    nmf_results.append(pool.apply_async(run_nmf, (alignment, num_clusters, args.alpha, args.mixing)))
+best_clusters = 1
+upper_clusters = [[0] * len(samples)]
+if not args.max_entropy == None:
+    upper_bin_clusters = upper_clusters[:] # with entropy bin
 
-# Wait for NMF to complete
-while not(all(a_thread.ready() for a_thread in nmf_results)):
-    time.sleep(sleep_time) # or 'pass' to not wait
+# Iterate through cluster levels requested
+sys.stderr.write("Beginning clustering of " + str(len(samples)) + " samples\n")
+for depth in range(0, args.hier):
+    new_clusters = [0] * len(samples)
+    new_bin_clusters = np.copy(new_clusters)
+    for upper_cluster in set(upper_clusters[depth]):
+        # Slice the alignment taking the cluster of the upper level, and enforcing the MAC cutoff again
+        # This is the numpy version. Bit awkward as mixing lists (which deal in values) and numpy (which deals in indices)
+        # sub_samples_idx = np.where(upper_clusters[depth] == upper_cluster)[0]
+        # sub_samples = [samples[i] for i in sub_samples_idx]
 
-# Collect results
-divergences = []
-for clustering_results, num_clusters in zip(nmf_results, range(args.min_clusters, args.max_clusters + 1)):
-    decomposition = clustering_results.get()
+        sub_samples_idx = [idx for idx in range(len(upper_clusters[depth])) if upper_clusters[depth][idx] == upper_cluster]
+        sub_samples = [samples[i] for i in sub_samples_idx]
+        if depth > 0:
+            sub_alignment = alignment[sub_samples_idx,:]
+            new_mac = np.sum(sub_alignment, axis = 0)
+            sub_alignment = sub_alignment[:,(new_mac >= args.min_mac) & (new_mac <= len(sub_samples) - args.min_mac)]
+        else:
+            sub_alignment = alignment
 
-    # assign to max val cluster, normalise each row by dividing by its sum
-    clusters = np.argmax(decomposition, axis = 1)
-    decomposition = decomposition/decomposition.sum(axis=1, keepdims = True)
+        # For all cluster sizes, run NMF in parallel
+        if args.verbose:
+            sys.stderr.write("Running NMF at depth " + str(depth) + ", cluster " + str(upper_cluster) + " with " + str(args.max_clusters - args.min_clusters + 1) + " cluster sizes\n")
+            sys.stderr.write("Sub-alignment size after frequency filtering " + str(sub_alignment.shape) + "\n")
 
-    # evaluate cluster distances
-    if os.path.isfile(args.dist_mat):
-        ind_mat = np.zeros((len(samples), num_clusters))
-        for cluster in range(0, num_clusters):
-            ind_mat[clusters == cluster, cluster] = 1
-        cluster_mat = np.dot(ind_mat, np.transpose(ind_mat))
-        cluster_mat = cluster_mat/cluster_mat.sum()
+        pool = ThreadPool(processes=args.threads)
+        nmf_results = []
+        for num_clusters in range(args.min_clusters, args.max_clusters + 1):
+            nmf_results.append(pool.apply_async(run_nmf, (sub_alignment, num_clusters, args.alpha, args.mixing)))
 
-        divergence = np.linalg.norm(cluster_mat - distances)
-        sys.stderr.write("Divergence between " + str(num_clusters) + " clusters and distances is " + str(divergence) + "\n")
-        divergences.append(divergence)
+        # Wait for NMF to complete
+        while not(all(a_thread.ready() for a_thread in nmf_results)):
+            time.sleep(sleep_time) # or 'pass' to not wait
 
-    # bin high entropy samples
-    # note stats.entropy([1/num_clusters] * num_clusters = -log_2(1/N)
-    if not args.max_entropy == None:
-        sys.stderr.write("Max possible entropy " + "{0:.2f}".format(stats.entropy([1/num_clusters] * num_clusters))
-                + "; binning over " + str(args.max_entropy) + "\n")
-        sample_entropy = np.apply_along_axis(stats.entropy, 1, decomposition)
-        clusters[sample_entropy > args.max_entropy] = -1
+        # Collect results
+        divergences = []
+        cluster_results = []
+        cluster_bin_results = []
+        for clustering_results, num_clusters in zip(nmf_results, range(args.min_clusters, args.max_clusters + 1)):
+            decomposition = clustering_results.get()
 
-    # Write output (file for phandango)
-    csv_out = open(args.output_prefix + "." + str(num_clusters) + "clusters.csv", 'w')
-    csv_sep = ','
+            # assign to max val cluster, normalise each row by dividing by its sum
+            clusters = np.argmax(decomposition, axis = 1)
+            cluster_results.append(clusters)
+            normalisation = decomposition.sum(axis=1, keepdims = True)
+            normalisation = np.where(normalisation > 0, normalisation, 1) # Catch div/0 errors
+            decomposition = decomposition/normalisation
 
-    csv_out.write(csv_sep.join(("name","cluster:o")) + "\n")
-    for sample in range(0, clusters.size):
-        csv_out.write(csv_sep.join((samples[sample], str(clusters[sample]))) + "\n")
+            # evaluate cluster distances
+            if os.path.isfile(args.dist_mat):
+                ind_mat = np.zeros((len(sub_samples), num_clusters))
+                for cluster in range(0, num_clusters):
+                    ind_mat[clusters == cluster, cluster] = 1
+                cluster_mat = np.dot(ind_mat, np.transpose(ind_mat))
+                cluster_mat = cluster_mat/cluster_mat.sum()
 
-    csv_out.close()
+                if depth > 0:
+                    sub_distances = distances[sub_samples_idx, sub_samples_idx]
+                else:
+                    sub_distances = distances
+                divergence = np.linalg.norm(cluster_mat - sub_distances)
+                if args.verbose:
+                    sys.stderr.write("Divergence between " + str(num_clusters) + " clusters and distances is " + str(divergence) + "\n")
+                divergences.append(divergence)
 
-    # Draw structure plot
-    if args.structure == True:
-        # first sort by assigned cluster, find breaks
-        sort_order = np.argsort(clusters)
+            # bin high entropy samples
+            # note stats.entropy([1/num_clusters] * num_clusters = -log_2(1/N)
+            if not args.max_entropy == None:
+                if args.verbose:
+                    sys.stderr.write("Possible entropy range 0-" + "{0:.2f}".format(stats.entropy([1/num_clusters] * num_clusters))
+                        + "; binning over " + str(args.max_entropy) + "\n")
+                sample_entropy = np.apply_along_axis(stats.entropy, 1, decomposition)
+                binned_clusters = np.copy(clusters)
+                binned_clusters[sample_entropy > args.max_entropy] = -1
+                cluster_bin_results.append(binned_clusters)
 
-        breaks = []
-        prev = None
-        for sample, sample_idx in zip(sort_order, range(0, clusters.size)):
-            if not clusters[sample] == prev:
-                breaks.append(sample_idx)
-                prev = clusters[sample]
+            # Draw structure plot
+            output_prefix = args.output_prefix + ".level" + str(depth) + "_cluster" + str(upper_cluster) + "." + str(num_clusters) + "clusters"
+            if args.structure == True:
+                # first sort by assigned cluster, find breaks
+                sort_order = np.argsort(binned_clusters)
 
-        bars = [] # In case I add a legend at some point
-        ind = np.arange(len(samples))
-        colours = plt.cm.Spectral(np.linspace(0, 1, num_clusters))
-        width = 1
+                breaks = []
+                prev = None
+                for sample, sample_idx in zip(sort_order, range(0, binned_clusters.size)):
+                    if not binned_clusters[sample] == prev:
+                        breaks.append(sample_idx)
+                        prev = binned_clusters[sample]
 
-        # draw stacked bar
-        for cluster in range(0, num_clusters):
-            if cluster == 0:
-                bars.append(plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],))
-                bottoms = decomposition[sort_order,cluster]
-            else:
-                bars.append(plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],
-                        bottom=bottoms))
-                bottoms += decomposition[sort_order,cluster]
+                bars = [] # In case I add a legend at some point
+                ind = np.arange(len(sub_samples))
+                colours = plt.cm.Spectral(np.linspace(0, 1, num_clusters))
+                width = 1
 
-        # draw breaks between clusters
-        for line in breaks:
-            if line == breaks[1] and clusters[sort_order[0]] == -1: # bin cluster
-                plt.axvline(line, linewidth=2, color='r', linestyle='dashed')
-            elif not line == 0:
-                plt.axvline(line, linewidth=2, color='w', linestyle='dashed')
+                # draw stacked bar
+                for cluster in range(0, num_clusters):
+                    if cluster == 0:
+                        bars.append(plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],))
+                        bottoms = decomposition[sort_order,cluster]
+                    else:
+                        bars.append(plt.bar(ind, decomposition[sort_order,cluster], width, color=colours[cluster],
+                                bottom=bottoms))
+                        bottoms += decomposition[sort_order,cluster]
 
-        plt.title('Structure plot for %d clusters' % num_clusters)
-        plt.ylabel('Assigned weight')
-        plt.xlabel('Samples')
-        plt.ylim([0,1])
-        plt.xlim([0,len(samples)])
-        plt.tick_params(
-            axis='y',
-            which='both',
-            left='off',
-            right='off',
-            labelbottom='off')
-        plt.savefig(args.output_prefix + "." + str(num_clusters) + "clusters.structure.pdf")
-        plt.close()
+                # draw breaks between clusters
+                for line in breaks:
+                    if line == breaks[1] and binned_clusters[sort_order[0]] == -1: # bin cluster
+                        plt.axvline(line, linewidth=2, color='r', linestyle='dashed')
+                    elif not line == 0:
+                        plt.axvline(line, linewidth=2, color='w', linestyle='dashed')
 
-# draw distances for each cluster
-if len(divergences) > 1:
-    best_clusters = args.min_clusters + divergences.index(min(divergences))
-    sys.stderr.write("Minimum divergence " + str(min(divergences)) + " at " + str(best_clusters) + " clusters\n")
+                plt.title('Structure plot for %d clusters' % num_clusters)
+                plt.ylabel('Assigned weight')
+                plt.xlabel('Samples')
+                plt.ylim([0,1])
+                plt.xlim([0,len(sub_samples)])
+                plt.tick_params(
+                    axis='y',
+                    which='both',
+                    left='off',
+                    right='off',
+                    labelbottom='off')
+                plt.savefig(output_prefix + ".structure.pdf")
+                plt.close()
 
-    colours = ['red', 'blue']
-    levels = [0, 1]
-    min_colours = np.where(divergences == min(divergences), 0, 1)
-    cmap, norm = matplotlib.colors.from_levels_and_colors(levels=levels, colors=colours, extend='max')
+            # give clusters unique values
+            clusters += args.max_clusters * upper_cluster
 
-    cluster_vals = np.arange(args.min_clusters, args.max_clusters + 1)
-    plt.plot(cluster_vals, divergences, 'k')
-    plt.scatter(cluster_vals, divergences, s=40, c=min_colours, cmap=cmap, norm=norm)
+            # Write output (file for phandango)
+            if args.write_all:
+                write_csv(output_prefix + ".csv", clusters, sub_samples)
 
-    plt.title('Lowest divergence at %d clusters' % best_clusters)
-    plt.xlabel('Number of clusters')
-    plt.ylabel('Divergence')
-    plt.xticks(cluster_vals, cluster_vals)
-    plt.savefig(args.output_prefix + ".divergences.pdf")
-    plt.close()
+        # choose best clustering
+        best_clusters = args.min_clusters + divergences.index(min(divergences))
+        for sample_idx, cluster_idx in zip(sub_samples_idx, range(0, len(sub_samples_idx))):
+            new_clusters[sample_idx] = cluster_results[best_clusters - args.min_clusters][cluster_idx]
+            new_bin_clusters[sample_idx] = cluster_bin_results[best_clusters - args.min_clusters][cluster_idx]
 
-#TODO
-# Compare with BAPS, if provided
-if os.path.isfile(str(args.baps_file)):
-    baps = {}
-    baps_clusters = set()
+        # draw distances for each cluster
+        output_prefix = args.output_prefix + ".level" + str(depth) + "_cluster" + str(upper_cluster)
+        if len(divergences) > 1:
+            if args.verbose:
+                sys.stderr.write("Minimum divergence " + str(min(divergences)) + " at " + str(best_clusters) + " clusters\n")
 
-    # Read in file
-    with(open(args.baps_file)) as f:
-        for _ in range(2):
-            next(f)
-        for line in f:
-            line = line.rstrip()
-            (row,cluster,lane) = line.split(separator)
-            baps[lane] = int(cluster)
-            baps_clusters.add(int(cluster))
+            colours = ['red', 'blue']
+            levels = [0, 1]
+            min_colours = np.where(divergences == min(divergences), 0, 1)
+            cmap, norm = matplotlib.colors.from_levels_and_colors(levels=levels, colors=colours, extend='max')
 
-    # Build array of arrays
-    baps_sets = [[] for _ in range(len(baps_clusters))]
-    for lane in baps.keys():
-        baps_sets[baps[lane]-1].append(lane)
+            cluster_vals = np.arange(args.min_clusters, args.max_clusters + 1)
+            plt.plot(cluster_vals, divergences, 'k')
+            plt.scatter(cluster_vals, divergences, s=40, c=min_colours, cmap=cmap, norm=norm)
 
-    # Compare with fast cluster results
-    confusion_out = open(args.output_prefix + ".baps_confusion.txt", 'w')
-    confusion_out.write(separator.join(["BAPS cluster","Total in BAPS cluster"] + [str(x) for x in sorted(set(found_clusters))]) + "\n")
+            plt.title('Lowest divergence at %d clusters' % best_clusters)
+            plt.xlabel('Number of clusters')
+            plt.ylabel('Divergence')
+            plt.xticks(cluster_vals, cluster_vals)
+            plt.savefig(output_prefix + ".divergences.pdf")
+            plt.close()
 
-    score = 0
-    for cluster in baps_clusters:
-        num_in_cluster = [0] * len(set(found_clusters))
-        for lane in baps_sets[cluster-1]:
-            fast_cluster = found_clusters[file_index[lane]]
-            if not args.hier: # DBSCAN uses cluster = -1 for noise
-                num_in_cluster[fast_cluster+1] += 1
-            else: # others are 0-index based
-                num_in_cluster[fast_cluster] += 1
+    upper_clusters.append(new_clusters)
+    upper_bin_clusters.append(new_bin_clusters)
+    output_file = args.output_prefix + ".level" + str(depth) + "_best_clusters.csv"
+    if args.max_entropy == None:
+        write_csv(output_file, new_clusters, samples)
+    else:
+        write_csv(output_file, new_bin_clusters, samples)
 
-        score += max(num_in_cluster)
-        confusion_out.write(separator.join([str(cluster), str(len(baps_sets[cluster-1]))] + [str(x) for x in num_in_cluster]) + "\n")
 
-    confusion_out.close()
-    sys.stderr.write("Compared to " + str(len(baps_clusters)) + " BAPS clusters, " + str(score) + " samples of " + str(len(file_num)) + " are in the same clusters\n")
+# Done
+sys.stderr.write("Done\n")
 
