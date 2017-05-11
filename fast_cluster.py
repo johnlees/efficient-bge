@@ -34,7 +34,6 @@ io.add_argument("--seaview_mat",dest="seaview_mat", help="Pre-computed distances
 io.add_argument("--embedding",dest="embedding_file", help="Pre-computed t-SNE embedding", default=None)
 io.add_argument("-b", "--baps", dest="baps_file", help="BAPS clusters, for comparison", default=None)
 methods.add_argument("--mds", dest="mds", action='store_true', default=False, help="Use MDS instead of t-SNE")
-methods.add_argument("--nmf", dest="nmf", action='store_true', default=False, help="Use non-negative matrix factorisation instead of t-SNE")
 methods.add_argument("--hier", dest="hier", action='store_true', default=False, help="Use heirarchical clustering instead of embedding")
 options.add_argument("-d","--dimensions",dest="dimensions",help="Number of t-SNE dimensions to embed to",type=int,default=2)
 options.add_argument("-m", "--mash", dest="mash_exec", help="Location of mash executable",default='mash')
@@ -122,14 +121,11 @@ else:
     if args.mds:
         sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with MDS\n")
         model = MDS(n_components = args.dimensions, metric=True, dissimilarity = "precomputed", verbose = 1)
-    # non-negative matrix factorisation
-    elif args.nmf:
-        sys.stderr.write("Finding " + str(args.dimensions) + " factors with NMF\n")
-        model = NMF(args.dimensions)
     # default is t-SNE
     else:
         sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with t-SNE\n")
-        model = TSNE(n_components = args.dimensions, metric = "precomputed", n_iter=1000, verbose = 2, method = 'exact', learning_rate=1000, early_exaggeration = 4, n_iter_without_progress = 500, perplexity = 35)
+        #model = TSNE(n_components = args.dimensions, metric = "precomputed", n_iter=1000, verbose = 2, method = 'exact', learning_rate=1000, early_exaggeration = 4, n_iter_without_progress = 500, perplexity = 35)
+        model = TSNE(n_components = args.dimensions, metric = "precomputed", n_iter=1000, verbose = 2, method = 'barnes_hut', learning_rate=1000, early_exaggeration = 4, n_iter_without_progress = 100, perplexity = 35)
 
     embedding = model.fit_transform(distances)
     np.savetxt(str(args.output_prefix) + ".embedding.csv", embedding, delimiter=",")
