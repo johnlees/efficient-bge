@@ -138,7 +138,6 @@ for depth in range(0, args.hier):
 
             # assign to max val cluster, normalise each row by dividing by its sum
             clusters = np.argmax(decomposition, axis = 1)
-            cluster_results.append(clusters)
             normalisation = decomposition.sum(axis=1, keepdims = True)
             normalisation = np.where(normalisation > 0, normalisation, 1) # Catch div/0 errors
             decomposition = decomposition/normalisation
@@ -159,6 +158,10 @@ for depth in range(0, args.hier):
                 if args.verbose:
                     sys.stderr.write("Divergence between " + str(num_clusters) + " clusters and distances is " + str(divergence) + "\n")
                 divergences.append(divergence)
+
+            # give clusters unique values
+            clusters += args.max_clusters * upper_cluster
+            cluster_results.append(clusters)
 
             # bin high entropy samples
             # note stats.entropy([1/num_clusters] * num_clusters = -log_2(1/N)
@@ -219,9 +222,6 @@ for depth in range(0, args.hier):
                     labelbottom='off')
                 plt.savefig(output_prefix + ".structure.pdf")
                 plt.close()
-
-            # give clusters unique values
-            clusters += args.max_clusters * upper_cluster
 
             # Write output (file for phandango)
             if args.write_all:
