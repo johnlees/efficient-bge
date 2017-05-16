@@ -60,7 +60,7 @@ The most important parameter to change is epsilon. After the first run, look for
 You can also use heirarchical clustering, which requires you to choose
 a number of clusters
 
-    python ../efficient-bge/fast_cluster.py --assembly assemblies.txt --output clusters --hier --clusters 22
+    python fast_cluster.py --assembly assemblies.txt --output clusters --hier --clusters 22
 
 ### Output
 The output .csv can be dragged-and-dropped into [phandango](http://phandango.net/) to display the clusters against a phylogeny.
