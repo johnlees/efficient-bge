@@ -19,8 +19,10 @@ import time
 import numpy as np
 from scipy import stats
 from sklearn.decomposition import NMF
+
 import matplotlib.pyplot as plt
 import matplotlib.colors
+plt.switch_backend('agg')
 
 # internal libraries
 import ef_cluster

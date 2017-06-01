@@ -14,8 +14,10 @@ from sklearn.decomposition import NMF
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN,AgglomerativeClustering
+
 import matplotlib.pyplot as plt
 import matplotlib.markers
+plt.switch_backend('agg')
 
 import ef_cluster
 
