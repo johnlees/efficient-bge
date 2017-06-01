@@ -91,7 +91,7 @@ elif os.path.isfile(str(args.seaview_mat)):
             distances[line_nr-1,:] = np.asarray(line[1:len(seaview_mat[0])])
         line_nr += 1
 
-elif not os.path.isfile(str(args.embedding_file)) and not args.hier:
+elif not os.path.isfile(str(args.embedding_file)):
     # Run mash
     sys.stderr.write("Calculating distances with mash\n")
     distances = np.zeros((len(file_num), len(file_num)))
@@ -118,7 +118,7 @@ elif not os.path.isfile(str(args.embedding_file)) and not args.hier:
 # Run embedding
 if os.path.isfile(str(args.embedding_file)):
     embedding = np.loadtxt(str(args.embedding_file), delimiter=",")
-else:
+elif not args.hier:
     # metric MDS
     if args.mds:
         sys.stderr.write("Embedding samples into " + str(args.dimensions) + " dimensions with MDS\n")
